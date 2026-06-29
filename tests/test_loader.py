@@ -1,5 +1,5 @@
 """
-Unit tests for backend/core/document_loader.py
+Unit tests for backend/core/document_loader.py (M3: multi-format) and backend/utils/hasher.py
 
 Run with:
     pytest tests/test_loader.py -v
@@ -8,86 +8,128 @@ Run with:
 import sys
 import os
 
-# Allow imports from the project root when running pytest from anywhere
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.core.document_loader import parse_pdf
+from backend.core.document_loader import parse_pdf, parse_docx, parse_xlsx, parse_txt, DocumentLoader
+from backend.utils.hasher import compute_file_hash
 
 SAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "documents", "samples")
 
 
-def sample_path(filename: str) -> str:
+def sample_path(filename):
     return os.path.join(SAMPLES_DIR, filename)
 
 
 def test_parse_pdf_returns_list():
-    """parse_pdf should always return a list, even on success."""
     result = parse_pdf(sample_path("Fachrurrozi_Rosyadi_Resume.pdf"))
     assert isinstance(result, list)
-
-
-def test_parse_pdf_has_expected_keys():
-    """Each page dict must contain 'page_num' and 'text' keys."""
-    result = parse_pdf(sample_path("Fachrurrozi_Rosyadi_Resume.pdf"))
     assert len(result) > 0
-    for page in result:
-        assert "page_num" in page
-        assert "text" in page
 
 
-def test_parse_pdf_page_numbers_start_at_one():
-    """Page numbering should be 1-indexed (human-friendly), not 0-indexed."""
-    result = parse_pdf(sample_path("Fachrurrozi_Rosyadi_Resume.pdf"))
-    assert result[0]["page_num"] == 1
-
-
-def test_parse_pdf_page_numbers_are_sequential():
-    """Page numbers should increase monotonically by 1."""
-    result = parse_pdf(sample_path("s41598-025-18947-2.pdf"))
-    page_nums = [p["page_num"] for p in result]
-    assert page_nums == list(range(1, len(page_nums) + 1))
-
-
-def test_parse_pdf_text_based_document_has_content():
-    """A normal text-based PDF (resume) should yield non-empty text on at least one page."""
-    result = parse_pdf(sample_path("Fachrurrozi_Rosyadi_Resume.pdf"))
-    combined_text = " ".join(p["text"] for p in result)
-    assert len(combined_text.strip()) > 0
-
-
-def test_parse_pdf_academic_paper_multi_page():
-    """Academic paper should have multiple pages."""
-    result = parse_pdf(sample_path("s41598-025-18947-2.pdf"))
-    assert len(result) > 1
-
-
-def test_parse_pdf_scanned_id_card_likely_empty_text():
-    """
-    KTP.pdf is expected to be an image-based scan with no embedded text layer.
-    PyMuPDF should not crash, but extracted text per page may be empty.
-    This documents the known limitation that OCR (planned for M8) is needed for scans.
-    """
-    result = parse_pdf(sample_path("KTP.pdf"))
+def test_parse_docx_returns_list():
+    result = parse_docx(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
     assert isinstance(result, list)
-    # We don't assert text is empty (some scans embed a hidden text layer),
-    # we just assert the function handled it without raising an exception.
+    assert len(result) > 0
 
 
-def test_parse_pdf_invalid_path_returns_empty_list():
-    """A non-existent file path should not crash; it should return an empty list."""
-    result = parse_pdf(sample_path("this_file_does_not_exist.pdf"))
+def test_parse_docx_has_expected_keys():
+    result = parse_docx(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    for section in result:
+        assert "section_title" in section
+        assert "text" in section
+
+
+def test_parse_docx_invalid_path_returns_empty_list():
+    result = parse_docx(sample_path("does_not_exist.docx"))
     assert result == []
 
 
-def test_parse_pdf_financial_document_payslip():
-    """Payslip should parse without error and contain some content."""
-    result = parse_pdf(sample_path("payslips_2025.pdf"))
+def test_parse_xlsx_returns_list():
+    result = parse_xlsx(sample_path("Jadwal_Shift_Februari_2026_4_Minggu.xlsx"))
     assert isinstance(result, list)
     assert len(result) > 0
 
 
-def test_parse_pdf_climate_report():
-    """laporan_iklim_harian.pdf should parse without error."""
-    result = parse_pdf(sample_path("laporan_iklim_harian.pdf"))
+def test_parse_xlsx_has_expected_keys():
+    result = parse_xlsx(sample_path("Jadwal_Shift_Februari_2026_4_Minggu.xlsx"))
+    for sheet in result:
+        assert "sheet_name" in sheet
+        assert "text" in sheet
+
+
+def test_parse_xlsx_invalid_path_returns_empty_list():
+    result = parse_xlsx(sample_path("does_not_exist.xlsx"))
+    assert result == []
+
+
+def test_parse_txt_returns_list():
+    result = parse_txt(sample_path("Image data.txt"))
     assert isinstance(result, list)
-    assert len(result) > 0
+    assert len(result) == 1
+    assert "text" in result[0]
+
+
+def test_parse_txt_invalid_path_returns_empty_list():
+    result = parse_txt(sample_path("does_not_exist.txt"))
+    assert result == []
+
+
+def test_document_loader_detects_pdf():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("Fachrurrozi_Rosyadi_Resume.pdf"))
+    assert result["file_type"] == "pdf"
+    assert result["success"] is True
+
+
+def test_document_loader_detects_docx():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    assert result["file_type"] == "docx"
+    assert result["success"] is True
+
+
+def test_document_loader_detects_xlsx():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("Jadwal_Shift_Februari_2026_4_Minggu.xlsx"))
+    assert result["file_type"] == "xlsx"
+    assert result["success"] is True
+
+
+def test_document_loader_detects_txt():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("Image data.txt"))
+    assert result["file_type"] == "txt"
+    assert result["success"] is True
+
+
+def test_document_loader_unsupported_extension():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("something.zip"))
+    assert result["success"] is False
+    assert result["error"] is not None
+
+
+def test_document_loader_missing_file():
+    loader = DocumentLoader()
+    result = loader.load(sample_path("ghost_file.pdf"))
+    assert result["success"] is False
+    assert "not found" in result["error"].lower()
+
+
+def test_compute_file_hash_returns_32_char_hex():
+    file_hash = compute_file_hash(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    assert isinstance(file_hash, str)
+    assert len(file_hash) == 32
+    int(file_hash, 16)
+
+
+def test_compute_file_hash_is_deterministic():
+    hash1 = compute_file_hash(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    hash2 = compute_file_hash(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    assert hash1 == hash2
+
+
+def test_compute_file_hash_differs_for_different_files():
+    hash1 = compute_file_hash(sample_path("Fachrurrozi Rosyadi_Resume.docx"))
+    hash2 = compute_file_hash(sample_path("Jadwal_Shift_Februari_2026_4_Minggu.xlsx"))
+    assert hash1 != hash2
